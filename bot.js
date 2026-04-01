@@ -4,9 +4,11 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = "samvelzeta/zetanime-cache";
 
 // ======================
-// 🔥 CAPTURAR VIDEO REAL
+// 🔥 EXTRAER VIDEOS
 // ======================
 async function extractVideos(url) {
+
+  console.log("➡ intentando:", url);
 
   const browser = await chromium.launch({
     headless: true,
@@ -17,15 +19,12 @@ async function extractVideos(url) {
 
   const videos = new Set();
 
-  // 👇 interceptar TODO lo que carga
   page.on("response", async (res) => {
     try {
       const u = res.url();
 
-      if (
-        u.includes(".m3u8") ||
-        u.includes(".mp4")
-      ) {
+      if (u.includes(".m3u8") || u.includes(".mp4")) {
+        console.log("🎥 detectado:", u);
         videos.add(u);
       }
 
@@ -33,21 +32,21 @@ async function extractVideos(url) {
   });
 
   try {
-    console.log("➡ entrando:", url);
-
     await page.goto(url, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle",
       timeout: 60000
     });
 
-    // ⏳ dejar que cargue el player
-    await page.waitForTimeout(8000);
+    console.log("⏳ esperando player...");
+    await page.waitForTimeout(10000);
 
   } catch (e) {
     console.log("❌ error cargando:", url);
   }
 
   await browser.close();
+
+  console.log("📦 encontrados:", videos.size);
 
   return [...videos];
 }
@@ -58,7 +57,6 @@ async function extractVideos(url) {
 async function scrapeLatanime(slug, number) {
 
   const url = `https://latanime.org/ver/${slug}-${number}`;
-
   return await extractVideos(url);
 }
 
@@ -69,6 +67,8 @@ async function scrapeAnimeLatinoHD(slug, number) {
 
   const searchUrl = `https://www.animelatinohd.com/?s=${slug}`;
 
+  console.log("🔎 buscando:", searchUrl);
+
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox"]
@@ -77,13 +77,14 @@ async function scrapeAnimeLatinoHD(slug, number) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded" });
+    await page.goto(searchUrl, { waitUntil: "networkidle" });
 
-    // sacar primer resultado
     const link = await page.evaluate(() => {
       const a = document.querySelector("a[href*='anime']");
       return a ? a.href : null;
     });
+
+    console.log("🔗 encontrado:", link);
 
     if (!link) {
       await browser.close();
@@ -106,6 +107,8 @@ async function scrapeAnimeLatinoHD(slug, number) {
 // 🔥 GITHUB PUSH
 // ======================
 async function push(path, content) {
+
+  console.log("⬆ subiendo:", path);
 
   const url = `https://api.github.com/repos/${REPO}/contents/${path}`;
   const base64 = Buffer.from(content).toString("base64");
@@ -168,7 +171,7 @@ async function save(slug, number, videos) {
 // ======================
 async function run() {
 
-  console.log("🚀 BOT LATINO REAL");
+  console.log("🚀 BOT LATINO DEBUG");
 
   const animes = [
     { slug: "one-piece", episodes: [1100] }
@@ -176,6 +179,8 @@ async function run() {
 
   for (const anime of animes) {
     for (const ep of anime.episodes) {
+
+      console.log("🎬 procesando:", anime.slug, ep);
 
       let videos = [];
 
@@ -188,7 +193,7 @@ async function run() {
     }
   }
 
-  console.log("✅ FIN");
+  console.log("✅ FIN TOTAL");
 }
 
 run();
