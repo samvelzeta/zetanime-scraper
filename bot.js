@@ -1,6 +1,5 @@
 import fetch from "node-fetch";
-import cheerio from "cheerio";
-
+import * as cheerio from "cheerio"; // ✅ FIX
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = "samvelzeta/zetanime-cache";
 
