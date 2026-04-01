@@ -1,39 +1,55 @@
-import * as cheerio from "cheerio";
+import { chromium } from "playwright";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = "samvelzeta/zetanime-cache";
 
 // ======================
-// 🔥 FETCH
+// 🔥 CAPTURAR VIDEO REAL
 // ======================
-async function fetchHtml(url) {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "es-ES,es;q=0.9"
+async function extractVideos(url) {
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox"]
+  });
+
+  const page = await browser.newPage();
+
+  const videos = new Set();
+
+  // 👇 interceptar TODO lo que carga
+  page.on("response", async (res) => {
+    try {
+      const u = res.url();
+
+      if (
+        u.includes(".m3u8") ||
+        u.includes(".mp4")
+      ) {
+        videos.add(u);
       }
+
+    } catch {}
+  });
+
+  try {
+    console.log("➡ entrando:", url);
+
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
     });
 
-    return await res.text();
-  } catch {
-    return null;
+    // ⏳ dejar que cargue el player
+    await page.waitForTimeout(8000);
+
+  } catch (e) {
+    console.log("❌ error cargando:", url);
   }
-}
 
-// ======================
-// 🔥 EXTRAER VIDEO
-// ======================
-function extractVideoUrls(html) {
-  const urls = [];
+  await browser.close();
 
-  const m3u8 = html.match(/https?:\/\/[^"' ]+\.m3u8/g);
-  if (m3u8) urls.push(...m3u8);
-
-  const mp4 = html.match(/https?:\/\/[^"' ]+\.mp4/g);
-  if (mp4) urls.push(...mp4);
-
-  return [...new Set(urls)];
+  return [...videos];
 }
 
 // ======================
@@ -42,11 +58,8 @@ function extractVideoUrls(html) {
 async function scrapeLatanime(slug, number) {
 
   const url = `https://latanime.org/ver/${slug}-${number}`;
-  const html = await fetchHtml(url);
 
-  if (!html) return [];
-
-  return extractVideoUrls(html);
+  return await extractVideos(url);
 }
 
 // ======================
@@ -54,28 +67,39 @@ async function scrapeLatanime(slug, number) {
 // ======================
 async function scrapeAnimeLatinoHD(slug, number) {
 
-  const search = `https://www.animelatinohd.com/?s=${slug}`;
-  const html = await fetchHtml(search);
+  const searchUrl = `https://www.animelatinohd.com/?s=${slug}`;
 
-  if (!html) return [];
-
-  const $ = cheerio.load(html);
-
-  let link = null;
-
-  $("a").each((_, el) => {
-    const href = $(el).attr("href");
-    if (href && href.includes(slug)) link = href;
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox"]
   });
 
-  if (!link) return [];
+  const page = await browser.newPage();
 
-  const epUrl = `${link}/episodio-${number}`;
-  const epHtml = await fetchHtml(epUrl);
+  try {
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded" });
 
-  if (!epHtml) return [];
+    // sacar primer resultado
+    const link = await page.evaluate(() => {
+      const a = document.querySelector("a[href*='anime']");
+      return a ? a.href : null;
+    });
 
-  return extractVideoUrls(epHtml);
+    if (!link) {
+      await browser.close();
+      return [];
+    }
+
+    const epUrl = `${link}/episodio-${number}`;
+
+    await browser.close();
+
+    return await extractVideos(epUrl);
+
+  } catch {
+    await browser.close();
+    return [];
+  }
 }
 
 // ======================
@@ -116,7 +140,10 @@ async function push(path, content) {
 // ======================
 async function save(slug, number, videos) {
 
-  if (!videos.length) return;
+  if (!videos.length) {
+    console.log("⚠ sin videos:", slug, number);
+    return;
+  }
 
   const data = {
     slug,
@@ -141,7 +168,7 @@ async function save(slug, number, videos) {
 // ======================
 async function run() {
 
-  console.log("🚀 BOT LATINO FINAL");
+  console.log("🚀 BOT LATINO REAL");
 
   const animes = [
     { slug: "one-piece", episodes: [1100] }
