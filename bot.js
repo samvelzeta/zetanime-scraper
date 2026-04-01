@@ -1,5 +1,5 @@
-import fetch from "node-fetch";
-import * as cheerio from "cheerio"; // ✅ FIX
+import * as cheerio from "cheerio";
+
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = "samvelzeta/zetanime-cache";
 
@@ -141,7 +141,7 @@ async function save(slug, number, videos) {
 // ======================
 async function run() {
 
-  console.log("🚀 BOT LATINO");
+  console.log("🚀 BOT LATINO FINAL");
 
   const animes = [
     { slug: "one-piece", episodes: [1100] }
