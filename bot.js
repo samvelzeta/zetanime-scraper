@@ -1,16 +1,90 @@
 import fetch from "node-fetch";
-import { getLatanimeServers } from "./scraper/sources.js";
+import cheerio from "cheerio";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = "samvelzeta/zetanime-cache";
 
 // ======================
-// 🔥 PUSH GITHUB
+// 🔥 FETCH
 // ======================
-async function pushToGitHub(path, content) {
+async function fetchHtml(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "es-ES,es;q=0.9"
+      }
+    });
+
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+// ======================
+// 🔥 EXTRAER VIDEO
+// ======================
+function extractVideoUrls(html) {
+  const urls = [];
+
+  const m3u8 = html.match(/https?:\/\/[^"' ]+\.m3u8/g);
+  if (m3u8) urls.push(...m3u8);
+
+  const mp4 = html.match(/https?:\/\/[^"' ]+\.mp4/g);
+  if (mp4) urls.push(...mp4);
+
+  return [...new Set(urls)];
+}
+
+// ======================
+// 🔥 LATANIME
+// ======================
+async function scrapeLatanime(slug, number) {
+
+  const url = `https://latanime.org/ver/${slug}-${number}`;
+  const html = await fetchHtml(url);
+
+  if (!html) return [];
+
+  return extractVideoUrls(html);
+}
+
+// ======================
+// 🔥 ANIMELATINOHD
+// ======================
+async function scrapeAnimeLatinoHD(slug, number) {
+
+  const search = `https://www.animelatinohd.com/?s=${slug}`;
+  const html = await fetchHtml(search);
+
+  if (!html) return [];
+
+  const $ = cheerio.load(html);
+
+  let link = null;
+
+  $("a").each((_, el) => {
+    const href = $(el).attr("href");
+    if (href && href.includes(slug)) link = href;
+  });
+
+  if (!link) return [];
+
+  const epUrl = `${link}/episodio-${number}`;
+  const epHtml = await fetchHtml(epUrl);
+
+  if (!epHtml) return [];
+
+  return extractVideoUrls(epHtml);
+}
+
+// ======================
+// 🔥 GITHUB PUSH
+// ======================
+async function push(path, content) {
 
   const url = `https://api.github.com/repos/${REPO}/contents/${path}`;
-
   const base64 = Buffer.from(content).toString("base64");
 
   let sha = null;
@@ -31,7 +105,7 @@ async function pushToGitHub(path, content) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      message: "update cache",
+      message: "update latino",
       content: base64,
       sha
     })
@@ -41,50 +115,54 @@ async function pushToGitHub(path, content) {
 // ======================
 // 🔥 GUARDAR
 // ======================
-async function saveEpisode(slug, number, servers) {
+async function save(slug, number, videos) {
 
-  if (!servers.length) return;
+  if (!videos.length) return;
 
   const data = {
     slug,
     episode: number,
     sources: {
-      hls: servers.filter(s => s.embed.includes(".m3u8")).map(s => s.embed),
-      mp4: servers.filter(s => s.embed.includes(".mp4")).map(s => s.embed),
-      embed: servers.map(s => s.embed)
+      hls: videos.filter(v => v.includes(".m3u8")),
+      mp4: videos.filter(v => v.includes(".mp4")),
+      embed: videos
     },
     updated: Date.now()
   };
 
   const path = `data/${slug}/${number}-latino.json`;
 
-  await pushToGitHub(path, JSON.stringify(data, null, 2));
+  await push(path, JSON.stringify(data, null, 2));
 
   console.log("✔ guardado:", slug, number);
 }
 
 // ======================
-// 🔥 SCRAPER
+// 🔥 MAIN
 // ======================
 async function run() {
 
-  console.log("🚀 iniciando scraper latino");
+  console.log("🚀 BOT LATINO");
 
   const animes = [
-    { slug: "one-piece", episodes: [1100] },
-    { slug: "naruto", episodes: [1] }
+    { slug: "one-piece", episodes: [1100] }
   ];
 
   for (const anime of animes) {
     for (const ep of anime.episodes) {
 
-      const servers = await getLatanimeServers(anime.slug, ep);
+      let videos = [];
 
-      await saveEpisode(anime.slug, ep, servers);
+      const a = await scrapeLatanime(anime.slug, ep);
+      const b = await scrapeAnimeLatinoHD(anime.slug, ep);
+
+      videos = [...a, ...b];
+
+      await save(anime.slug, ep, videos);
     }
   }
 
-  console.log("✅ terminado");
+  console.log("✅ FIN");
 }
 
 run();
