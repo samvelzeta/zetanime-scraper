@@ -24,7 +24,7 @@ async function extractVideos(url) {
       const u = res.url();
 
       if (u.includes(".m3u8") || u.includes(".mp4")) {
-        console.log("🎥 detectado:", u);
+        console.log("🎥 video detectado en red:", u);
         videos.add(u);
       }
 
@@ -32,21 +32,24 @@ async function extractVideos(url) {
   });
 
   try {
+    console.log("🌐 navegando a:", url);
     await page.goto(url, {
       waitUntil: "networkidle",
-      timeout: 60000
+      timeout: 90000
     });
 
     console.log("⏳ esperando player...");
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(12000);
+
+    console.log("📄 título de página:", await page.title());
 
   } catch (e) {
-    console.log("❌ error cargando:", url);
+    console.log("❌ error cargando página:", url, "—", e.message);
   }
 
   await browser.close();
 
-  console.log("📦 encontrados:", videos.size);
+  console.log("📦 videos encontrados:", videos.size, [...videos]);
 
   return [...videos];
 }
@@ -65,9 +68,9 @@ async function scrapeLatanime(slug, number) {
 // ======================
 async function scrapeAnimeLatinoHD(slug, number) {
 
-  const searchUrl = `https://www.animelatinohd.com/?s=${slug}`;
+  const searchUrl = `https://www.animelatinohd.com/?s=${encodeURIComponent(slug)}`;
 
-  console.log("🔎 buscando:", searchUrl);
+  console.log("🔎 buscando en AnimeLatinoHD:", searchUrl);
 
   const browser = await chromium.launch({
     headless: true,
@@ -77,27 +80,70 @@ async function scrapeAnimeLatinoHD(slug, number) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(searchUrl, { waitUntil: "networkidle" });
+    console.log("🌐 navegando a búsqueda...");
+    await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 60000 });
 
+    console.log("📄 título de búsqueda:", await page.title());
+
+    // Esperar a que aparezcan resultados de búsqueda
+    console.log("⏳ esperando resultados de búsqueda...");
+    try {
+      await page.waitForSelector(
+        "a.post-title, .search-result a, article a, .post a[href*='/anime/']",
+        { timeout: 15000 }
+      );
+      console.log("✅ resultados de búsqueda cargados");
+    } catch (e) {
+      console.log("⚠ timeout esperando resultados, intentando con lo que hay:", e.message);
+    }
+
+    // Volcar todos los enlaces visibles para debuggear
+    const allLinks = await page.evaluate(() =>
+      [...document.querySelectorAll("a[href]")]
+        .map(a => a.href)
+        .filter(h => h.includes("animelatinohd.com"))
+        .slice(0, 20)
+    );
+    console.log("🔍 enlaces encontrados en página:", allLinks);
+
+    // Intentar selectores específicos primero, luego fallback genérico
     const link = await page.evaluate(() => {
-      const a = document.querySelector("a[href*='anime']");
-      return a ? a.href : null;
+      const selectors = [
+        "a.post-title",
+        ".search-result a",
+        "article h2 a",
+        "article h3 a",
+        ".post-title a",
+        "a[href*='/anime/']"
+      ];
+
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.href) {
+          console.log("selector usado:", sel, "->", el.href);
+          return el.href;
+        }
+      }
+      return null;
     });
 
-    console.log("🔗 encontrado:", link);
+    console.log("🔗 primer resultado seleccionado:", link);
 
     if (!link) {
+      console.log("❌ no se encontró ningún resultado para:", slug);
       await browser.close();
       return [];
     }
 
-    const epUrl = `${link}/episodio-${number}`;
+    const epUrl = `${link.replace(/\/$/, "")}/episodio-${number}`;
+    console.log("🎬 URL del episodio:", epUrl);
 
     await browser.close();
 
     return await extractVideos(epUrl);
 
-  } catch {
+  } catch (e) {
+    console.log("❌ error en scrapeAnimeLatinoHD:", e.message);
     await browser.close();
     return [];
   }
